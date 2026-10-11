@@ -1,0 +1,183 @@
+// InFind - Production PostgreSQL Prisma Schema
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+}
+
+enum MatchStatus {
+  WAITING
+  CONNECTED
+  TERMINATED
+}
+
+enum ReportCategory {
+  HARASSMENT
+  SPAM
+  INAPPROPRIATE_BEHAVIOR
+  IMPERSONATION
+  THREATS
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  RESOLVED
+  DISMISSED
+}
+
+model User {
+  id                 String          @id @default(cuid())
+  username           String
+  normalizedUsername String          @unique
+  displayName        String
+  passwordHash       String
+  email              String?
+  emailVerified      Boolean         @default(false)
+  role               UserRole        @default(USER)
+  status             AccountStatus   @default(ACTIVE)
+  suspensionReason   String?
+  suspendedUntil     DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  sessions           Session[]
+  preference         UserPreference?
+  reportsSent        Report[]        @relation("ReportsSent")
+  reportsReceived    Report[]        @relation("ReportsReceived")
+  reportsReviewed    Report[]        @relation("ReportsReviewed")
+  blocksSent         Block[]         @relation("BlocksSent")
+  blocksReceived     Block[]         @relation("BlocksReceived")
+  messagesSent       Message[]       @relation("MessagesSent")
+  moderationAudits   ModerationAudit[] @relation("AdminAudits")
+  targetAudits       ModerationAudit[] @relation("TargetAudits")
+
+  @@index([normalizedUsername])
+  @@index([role])
+  @@index([status])
+}
+
+model Session {
+  id             String    @id @default(cuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hashedToken    String    @unique
+  createdAt      DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model UserPreference {
+  id                 String   @id @default(cuid())
+  userId             String   @unique
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  preferredCountries String   @default("[]")
+  preferredLanguages String   @default("[]")
+  interests          String   @default("[]")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model MatchSession {
+  id                String      @id @default(cuid())
+  user1Id           String
+  user2Id           String
+  status            MatchStatus @default(CONNECTED)
+  terminationReason String?
+  connectedAt       DateTime    @default(now())
+  endedAt           DateTime?
+  createdAt         DateTime    @default(now())
+
+  messages          Message[]
+  reports           Report[]
+
+  @@index([user1Id])
+  @@index([user2Id])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Block {
+  id          String   @id @default(cuid())
+  blockerId   String
+  blockedId   String
+  blocker     User     @relation("BlocksSent", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked     User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@index([blockerId])
+  @@index([blockedId])
+}
+
+model Report {
+  id              String         @id @default(cuid())
+  reporterId      String
+  reportedId      String
+  matchSessionId  String?
+  category        ReportCategory
+  description     String?
+  status          ReportStatus   @default(PENDING)
+  moderatorId     String?
+  resolutionNotes String?
+  createdAt       DateTime       @default(now())
+  resolvedAt      DateTime?
+
+  reporter        User          @relation("ReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
+  reported        User          @relation("ReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  moderator       User?         @relation("ReportsReviewed", fields: [moderatorId], references: [id], onDelete: SetNull)
+  matchSession    MatchSession? @relation(fields: [matchSessionId], references: [id], onDelete: SetNull)
+
+  @@index([reporterId])
+  @@index([reportedId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  matchSessionId String
+  senderId       String
+  content        String
+  createdAt      DateTime     @default(now())
+
+  matchSession   MatchSession @relation(fields: [matchSessionId], references: [id], onDelete: Cascade)
+  sender         User         @relation("MessagesSent", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([matchSessionId])
+  @@index([createdAt])
+}
+
+model ModerationAudit {
+  id           String   @id @default(cuid())
+  adminId      String
+  actionType   String
+  targetUserId String?
+  metadata     String?
+  createdAt    DateTime @default(now())
+
+  admin        User     @relation("AdminAudits", fields: [adminId], references: [id], onDelete: Cascade)
+  targetUser   User?    @relation("TargetAudits", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([adminId])
+  @@index([targetUserId])
+  @@index([createdAt])
+}
